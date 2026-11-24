@@ -1,0 +1,7 @@
+flask
+gunicorn
+httpx
+ddgs
+groq
+pandas
+openpyxl
