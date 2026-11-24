@@ -1,4 +1,7 @@
 flask
+gunicorn
+httpx
 ddgs
 groq
-httpx
+pandas
+openpyxl
