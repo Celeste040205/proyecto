@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Análisis de margen de precios</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --tx:#1c2230; --mut:#6b7385; --br:#e3e6ec; --ac:#2f5bea; --ok:#13803f; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#12151c; --card:#1b2029; --tx:#e8ebf2; --mut:#98a0b3; --br:#2b3240; --ac:#6c8cff; --ok:#4cd07d; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--tx); font:15px/1.5 system-ui, sans-serif; }
+  main { max-width:1250px; margin:0 auto; padding:24px 16px 48px; }
+  h1 { font-size:22px; margin:0 0 4px; } h2 { font-size:16px; margin:0 0 10px; }
+  .sub, .mut { color:var(--mut); } .sub { margin:0 0 20px; } .err { color:#d33; }
+  .card { background:var(--card); border:1px solid var(--br); border-radius:12px; padding:16px; margin-bottom:16px; }
+  .row, .filters, .head, .kpis { display:flex; gap:8px; align-items:center; } .head { justify-content:space-between; margin-bottom:10px; }
+  .filters, .kpis { flex-wrap:wrap; margin-bottom:10px; }
+  .kpi { border:1px solid var(--br); border-radius:10px; padding:8px 12px; font-size:13px; background:var(--bg); }
+  .kpi strong { display:block; font-size:15px; }
+  input[type=text], select { padding:8px 10px; border:1px solid var(--br); border-radius:8px; background:var(--bg); color:var(--tx); font-size:14px; }
+  #producto { flex:1; padding:10px 12px; font-size:15px; }
+  button { padding:10px 18px; border:0; border-radius:8px; background:var(--ac); color:#fff; font-size:15px; cursor:pointer; }
+  button:disabled { opacity:.6; cursor:wait; } a.btn { color:var(--ac); text-decoration:none; font-size:14px; }
+  .chips { display:flex; flex-wrap:wrap; gap:8px; margin-top:12px; }
+  .chips label, .chip { border:1px solid var(--br); border-radius:999px; padding:3px 12px; font-size:13px; color:var(--mut); }
+  .chips label { cursor:pointer; } .chips input { margin-right:6px; } .chip.off { opacity:.55; }
+  .tablewrap { overflow-x:auto; } table { width:100%; border-collapse:collapse; font-size:14px; }
+  th, td { text-align:left; padding:8px 10px; border-bottom:1px solid var(--br); white-space:nowrap; }
+  th { color:var(--mut); font-weight:600; cursor:pointer; user-select:none; } td.wrap { white-space:normal; min-width:240px; }
+  tr.best td { background:rgba(19,128,63,.12); } td.price { font-weight:700; } .best td.price { color:var(--ok); }
+  .up { color:#d33; } .down { color:var(--ok); } .sep td { border-top:2px solid var(--br); } .cmp-sub { font-size:13px; margin:12px 0 6px; font-weight:600; }
+  .avisos { margin:8px 0; font-size:13px; color:#c77d00; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Comparador y análisis de margen de precios</h1>
+  <p class="sub"></p>
+
+  <div class="card">
+    <div class="row">
+      <input id="producto" type="text" placeholder="Ej: alumband, superacryl, cemento asfaltico..." autofocus>
+      <button id="btn">Consultar</button>
+    </div>
+    <div class="chips">
+      {% for e in empresas %}
+      <label><input type="checkbox" class="emp" value="{{ e.dominio }}" checked>{{ e.dominio }}</label>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div id="estado" class="mut"></div>
+
+  <div id="resultado" class="card" hidden>
+    <h2>Resultado</h2>
+    <p id="resumen" style="margin:0 0 8px"></p>
+    <div id="tiendas" class="chips" style="margin:0 0 8px"></div>
+    <div id="avisos" class="avisos"></div>
+    <div id="res-grid"></div>
+  </div>
+
+  <div class="card">
+    <h2>Análisis de margen de precios (mismo tipo)</h2>
+    <p class="mut" style="margin:0 0 8px;font-size:13px">Cada producto de la marca base se compara exclusivamente con productos de su mismo tipo.</p>
+    <div class="filters">
+      <label class="mut">Marca base <select id="cmp-base"></select></label>
+      <select id="cmp-cons"></select>
+      <select id="cmp-tipo"></select>
+      <button id="cmp-btn" style="padding:8px 14px;font-size:14px">Analizar margen</button>
+      <span id="cmp-msg" class="mut"></span>
+      <span id="cmp-dl"></span>
+    </div>
+    <div class="mut" style="font-size:13px">Marcas a contrastar:</div>
+    <div id="cmp-marcas" class="chips" style="margin:6px 0"></div>
+    <div id="cmp-out"></div>
+  </div>
+
+  <div class="card">
+    <div class="head"><h2 style="margin:0">Todo lo consultado</h2><a class="btn" href="/descargar">Descargar CSV</a></div>
+    <div id="hist-grid"></div>
+  </div>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const num = v => { const n = parseFloat(String(v).replace(",", ".").replace(/[^0-9.]/g, "")); return isNaN(n) ? null : n; };
+const money = n => n === null ? "N/D" : "USD " + n.toFixed(2);
+
+const COLS = [
+  ["fecha", "Fecha", true], ["consulta", "Consulta", true],
+  ["producto", "Producto"], ["marca", "Marca"], ["tipo", "Tipo"], ["presentacion", "Presentación"],
+  ["precio", "Precio"], ["empresa", "Tienda"], ["disponibilidad", "Stock"], ["url", "Enlace"],
+];
+
+function Grid(root, hist) {
+  const cols = COLS.filter(c => hist || !c[2]);
+  const filtros = [["empresa", "Todas las tiendas"], ["marca", "Todas las marcas"], ["tipo", "Todos los tipos"]];
+  if (hist) filtros.unshift(["consulta", "Todas las consultas"]);
+  root.innerHTML = `<div class="filters"><input type="text" class="q" placeholder="Filtrar por texto…">
+    ${filtros.map(f => `<select data-f="${f[0]}"></select>`).join("")}<span class="mut n"></span></div>
+    <div class="tablewrap"><table><thead><tr>${cols.map(c => `<th data-k="${c[0]}">${c[1]}</th>`).join("")}</tr></thead><tbody></tbody></table></div>`;
+  let rows = [], sort = { k: "precio", d: 1 };
+
+  function render() {
+    const f = {}; root.querySelectorAll("select").forEach(s => f[s.dataset.f] = s.value);
+    const q = root.querySelector(".q").value.toLowerCase();
+    const list = rows.filter(r => Object.keys(f).every(k => !f[k] || r[k] === f[k]) &&
+      (!q || [r.producto, r.marca, r.tipo, r.empresa].join(" ").toLowerCase().includes(q)));
+    list.sort((a, b) => {
+      const x = a[sort.k], y = b[sort.k];
+      if (sort.k === "precio") return ((x === null) - (y === null)) || (x - y) * sort.d;
+      return String(x ?? "").localeCompare(String(y ?? ""), "es") * sort.d;
+    });
+    const min = Math.min(...list.map(r => r.precio).filter(p => p !== null));
+    root.querySelector(".n").textContent = `${list.length} de ${rows.length} productos`;
+    root.querySelector("tbody").innerHTML = list.length ? list.map(r => `<tr class="${r.precio === min ? "best" : ""}">` +
+      cols.map(c => {
+        const k = c[0], v = r[k];
+        if (k === "url") return `<td>${/^https?:\/\//.test(v) ? `<a class="btn" href="${esc(v)}" target="_blank" rel="noopener">Ver</a>` : ""}</td>`;
+        if (k === "precio") return `<td class="price">${money(v)}</td>`;
+        return `<td class="${k === "producto" || k === "consulta" ? "wrap" : ""}">${esc(v)}</td>`;
+      }).join("") + "</tr>").join("") : `<tr><td colspan="${cols.length}" class="mut">Sin productos.</td></tr>`;
+    root.querySelectorAll("th").forEach(th => th.textContent = th.textContent.replace(/ [▲▼]$/, "") +
+      (th.dataset.k === sort.k ? (sort.d > 0 ? " ▲" : " ▼") : ""));
+  }
+
+  root.addEventListener("input", render);
+  root.addEventListener("change", render);
+  root.addEventListener("click", e => {
+    const th = e.target.closest("th"); if (!th) return;
+    sort = { k: th.dataset.k, d: sort.k === th.dataset.k ? -sort.d : 1 }; render();
+  });
+  return { set(data) {
+    rows = data;
+    root.querySelectorAll("select").forEach(s => {
+      const k = s.dataset.f, vals = [...new Set(rows.map(r => r[k]).filter(Boolean))].sort((a, b) => a.localeCompare(b, "es"));
+      s.innerHTML = `<option value="">${filtros.find(f => f[0] === k)[1]}</option>` + vals.map(v => `<option>${esc(v)}</option>`).join("");
+    });
+    render();
+  } };
+}
+
+const gRes = Grid($("res-grid"), false), gHist = Grid($("hist-grid"), true);
+
+async function consultar() {
+  const producto = $("producto").value.trim(); if (!producto) return;
+  const dominios = [...document.querySelectorAll(".emp:checked")].map(c => c.value);
+  $("btn").disabled = true; $("estado").className = "mut";
+  $("estado").textContent = "Consultando tiendas usando el catálogo base de Imptek y clasificando…";
+  $("resultado").hidden = true;
+  try {
+    const r = await fetch("/api/consultar", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ producto, dominios }) });
+    const d = await r.json(); if (!r.ok) throw new Error(d.error || "Error desconocido");
+    $("resumen").textContent = d.resumen;
+    $("tiendas").innerHTML = d.tiendas.map(t => `<span class="chip ${t.cantidad ? "" : "off"}" title="${esc(t.nota)}">${esc(t.dominio)} · ${esc(t.metodo)} · ${t.cantidad}</span>`).join("");
+    const vacias = d.tiendas.filter(t => !t.cantidad).map(t => t.dominio);
+    $("avisos").innerHTML = [...d.avisos, ...(vacias.length ? [`Sin datos en: ${vacias.join(", ")}.`] : [])].map(esc).join("<br>");
+    gRes.set(d.productos.map(p => ({ ...p, precio: p.precio === null ? null : Number(p.precio) })));
+    $("resultado").hidden = false; $("estado").textContent = "";
+    cargarHistorial();
+  } catch (e) { $("estado").className = "err"; $("estado").textContent = "Error: " + e.message; }
+  finally { $("btn").disabled = false; }
+}
+
+async function cargarHistorial() {
+  const filas = await (await fetch("/api/historial")).json();
+  gHist.set(filas.map(f => ({ ...f, precio: num(f.precio) })));
+  cargarMarcas();
+}
+
+const marcasSel = new Set(); let marcasData = [];
+const enlace = (u, txt) => /^https?:\/\//.test(u) ? `<a class="btn" href="${esc(u)}" target="_blank" rel="noopener">${esc(txt)}</a>` : esc(txt);
+
+function pintarChips() {
+  const base = $("cmp-base").value;
+  $("cmp-marcas").innerHTML = marcasData.filter(m => m.marca !== base).map(m => `<label><input type="checkbox" class="mk" value="${esc(m.marca)}" ${marcasSel.has(m.marca) ? "checked" : ""}>${esc(m.marca)} (${m.n})</label>`).join("")
+    || `<span class="mut">Aún no hay marcas con precio: haz una consulta primero.</span>`;
+}
+async function cargarMarcas() {
+  const d = await (await fetch("/api/marcas")).json();
+  marcasData = d.marcas;
+  const fill = (id, vals, label) => { const s = $(id), cur = s.value;
+    s.innerHTML = `<option value="">${label}</option>` + vals.map(v => `<option>${esc(v)}</option>`).join(""); s.value = cur; };
+  fill("cmp-cons", d.consultas, "Todas las consultas"); fill("cmp-tipo", d.tipos, "Todos los tipos");
+  const b = $("cmp-base"), cur = b.value;
+  b.innerHTML = d.marcas.map(m => `<option>${esc(m.marca)}</option>`).join("");
+  b.value = cur || (d.marcas.find(m => m.marca.toLowerCase() === "imptek") || d.marcas[0] || {}).marca || "";
+  pintarChips();
+}
+$("cmp-base").addEventListener("change", pintarChips);
+$("cmp-marcas").addEventListener("change", e => { e.target.checked ? marcasSel.add(e.target.value) : marcasSel.delete(e.target.value); });
+
+async function analizarMargen() {
+  const base = $("cmp-base").value, otras = [...marcasSel].filter(m => m !== base);
+  if (!base || !otras.length) { $("cmp-msg").textContent = "Elige la marca base y marca al menos otra marca."; return; }
+  $("cmp-msg").textContent = "";
+  const p = new URLSearchParams({ base }); otras.forEach(m => p.append("marcas", m));
+  if ($("cmp-cons").value) p.set("consulta", $("cmp-cons").value);
+  if ($("cmp-tipo").value) p.set("tipo", $("cmp-tipo").value);
+  const d = await (await fetch("/api/comparar?" + p)).json();
+  if (d.error) { $("cmp-msg").textContent = d.error; return; }
+  $("cmp-dl").innerHTML = `<a class="btn" href="/descargar-comparacion?${p}">Descargar CSV de margen</a>`;
+  if (!d.filas.length) { $("cmp-out").innerHTML = `<p class="mut">${esc(base)} no tiene productos con precio con esos filtros.</p>`; return; }
+
+  const m = d.metricas || {};
+  const fmtPct = v => v === null || v === undefined ? "—" : `<span class="${v > 0 ? "up" : "down"}">${v > 0 ? "+" : ""}${v.toFixed(1)}%</span>`;
+  const fmtUsd = v => v === null || v === undefined ? "—" : `${v > 0 ? "+" : ""}${v.toFixed(2)}`;
+  const kpiHtml = `<div class="kpis">
+    <div class="kpi"><span class="mut">Pares analizados</span><strong>${m.total_pares ?? 0}</strong></div>
+    <div class="kpi"><span class="mut">Margen promedio %</span><strong>${fmtPct(m.margen_pct_promedio)}</strong></div>
+    <div class="kpi"><span class="mut">Margen promedio USD</span><strong>${fmtUsd(m.margen_usd_promedio)}</strong></div>
+    <div class="kpi"><span class="mut">Rango margen %</span><strong>${fmtPct(m.margen_pct_min)} a ${fmtPct(m.margen_pct_max)}</strong></div>
+  </div>`;
+
+  const grupos = new Map();
+  d.filas.forEach(f => {
+    const k = f.url_base + "|" + f.producto_base + "|" + f.tienda_base;
+    if (!grupos.has(k)) grupos.set(k, []);
+    grupos.get(k).push(f);
+  });
+  let body = "";
+  grupos.forEach(rows => {
+    const b = rows[0], n = rows.length;
+    rows.forEach((f, i) => {
+      const bc = i ? "" : `<td rowspan="${n}">${esc(b.tipo)}</td><td rowspan="${n}" class="wrap">${enlace(b.url_base, b.producto_base)}</td><td rowspan="${n}">${esc(b.presentacion_base)}</td><td rowspan="${n}" class="price">${money(b.precio_base)}</td><td rowspan="${n}">${esc(b.tienda_base)}</td>`;
+      const resto = f.producto_comp === null
+        ? `<td colspan="6" class="mut">Sin productos de ${esc(f.marca)} en este tipo</td>`
+        : `<td class="wrap">${enlace(f.url_comp, f.producto_comp)}</td><td>${esc(f.presentacion_comp)}</td><td class="price">${money(f.precio_comp)}</td><td>${esc(f.tienda_comp)}</td>
+           <td>${fmtUsd(f.margen_usd)}</td><td>${fmtPct(f.margen_pct)}</td>`;
+      body += `<tr class="${i ? "" : "sep"}">${bc}<td>${esc(f.marca)}</td>${resto}</tr>`;
+    });
+  });
+  $("cmp-out").innerHTML = `${kpiHtml}<div class="cmp-sub">Margen frente a ${esc(base)} (solo mismo tipo): <span class="down">verde = competidor más barato</span>, <span class="up">rojo = competidor más caro</span></div>
+    <div class="tablewrap"><table><thead><tr><th>Tipo</th><th>Producto ${esc(base)}</th><th>Pres.</th><th>Precio</th><th>Tienda</th><th>Marca</th><th>Producto comparado</th><th>Pres.</th><th>Precio</th><th>Tienda</th><th>Margen USD</th><th>Margen %</th></tr></thead><tbody>${body}</tbody></table></div>`;
+}
+$("cmp-btn").addEventListener("click", analizarMargen);
+
+$("btn").addEventListener("click", consultar);
+$("producto").addEventListener("keydown", e => { if (e.key === "Enter") consultar(); });
+cargarHistorial();
+</script>
+</body>
+</html>

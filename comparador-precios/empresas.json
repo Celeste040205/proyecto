@@ -1,0 +1,32 @@
+[
+  {
+    "canal": "Retail",
+    "nombre": "Comercial Kywi S.A",
+    "dominio": "kywi.com.ec",
+    "url": "https://www.kywi.com.ec/"
+  },
+  {
+    "canal": "Retail",
+    "nombre": "Comisariato del constructor S.A Comitructor",
+    "dominio": "comisariatodelconstructor.com",
+    "url": "https://comisariatodelconstructor.com/"
+  },
+  {
+    "canal": "Retail",
+    "nombre": "Corporación el Rosado S.A",
+    "dominio": "frecuento.com",
+    "url": "https://www.frecuento.com/"
+  },
+  {
+    "canal": "Retail",
+    "nombre": "Homercenters Ecuatorianos SAS",
+    "dominio": "promart.ec",
+    "url": "https://www.promart.ec/"
+  },
+  {
+    "canal": "Retail",
+    "nombre": "Megametales",
+    "dominio": "megametales.com.ec",
+    "url": "https://www.megametales.com.ec/"
+  }
+]
